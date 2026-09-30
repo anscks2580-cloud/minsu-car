@@ -667,6 +667,7 @@
   "consultModels": ["A-Class","C-Class","E-Class","S-Class","CLE","GLA","GLB","GLC","GLE","GLS","G-Class","EQ 전기차","Mercedes-AMG","Mercedes-Maybach","미정 / 상담 후 결정"],
   "consultMethods": ["전화","카카오톡","문자","전시장 방문"],
   "consultFormEmail": "",
+  "consultAccessKey": "2cb4533e-023a-4fe8-868f-b3b8359836da",
 
   "realCarsLabel": "Real Cars",
   "realCarsTitle": "실차 사진",
@@ -853,10 +854,11 @@
       <div class="field"><span class="flabel" id="consultFieldMethod"></span><div class="method-group" id="cfMethods" role="radiogroup" aria-labelledby="consultFieldMethod"></div></div>
       <div class="field"><label for="cfMessage" id="consultFieldMessage"></label><textarea id="cfMessage" name="문의내용"></textarea></div>
       <div class="field"><label class="consent"><input type="checkbox" name="개인정보동의" value="동의" required><span id="consultConsentText"></span></label></div>
-      <input type="hidden" name="_subject" value="[홈페이지] 견적·상담 신청">
-      <input type="hidden" name="_template" value="table">
-      <input type="hidden" name="_captcha" value="true">
-      <input type="hidden" name="_next" value="">
+      <input type="hidden" name="access_key" value="">
+      <input type="hidden" name="subject" value="[홈페이지] 견적·상담 신청">
+      <input type="hidden" name="from_name" value="홈페이지 견적·상담 신청">
+      <input type="hidden" name="redirect" value="">
+      <input type="checkbox" name="botcheck" style="display:none" tabindex="-1" autocomplete="off">
       <div class="form-foot">
         <button type="submit" class="btn btn-dark" id="consultSubmitBtn">상담 신청하기</button>
         <p class="form-note" id="consultFormNote"></p>
@@ -1280,7 +1282,6 @@
 
   function render(){
     document.body.classList.toggle('edit-mode', EDIT);
-    if(!CONTENT.consultFormEmail && validEmail(CONTENT.serviceFormEmail)) CONTENT.consultFormEmail = CONTENT.serviceFormEmail; // 구버전 호환
     var tel = telHref(CONTENT.phone);
     var kakao = safeUrl(CONTENT.kakaoUrl);
 
@@ -1387,12 +1388,14 @@
       return '<label><input type="radio" name="희망상담방법" value="'+esc(m)+'"'+(checked?' checked':'')+'><span>'+esc(m)+'</span></label>';
     }).join('');
     mg.parentElement.hidden = !methods.length;
-    hint('consultEditHint', '접수 이메일, 관심 차종 목록, 상담 방법은 하단 <b>설정</b>에서 바꿀 수 있습니다.' + (validEmail(CONTENT.consultFormEmail) ? '' : ' <b>현재 접수 이메일이 설정되지 않았습니다.</b>'));
+    hint('consultEditHint', '접수 키, 관심 차종 목록, 상담 방법은 하단 <b>설정</b>에서 바꿀 수 있습니다.' + (str(CONTENT.consultAccessKey).trim() ? '' : ' <b>현재 접수 키(Access Key)가 설정되지 않았습니다.</b>'));
     var cform = document.getElementById('consultForm');
-    if(validEmail(CONTENT.consultFormEmail)){
-      cform.action = 'https://formsubmit.co/' + CONTENT.consultFormEmail.trim();
+    var akey = str(CONTENT.consultAccessKey).trim();
+    if(akey){
+      cform.action = 'https://api.web3forms.com/submit';
       cform.method = 'POST';
-      var nextInput = cform.querySelector('input[name="_next"]');
+      cform.querySelector('input[name="access_key"]').value = akey;
+      var nextInput = cform.querySelector('input[name="redirect"]');
       if(nextInput && /^https?:$/.test(location.protocol)) nextInput.value = location.origin + location.pathname + '?sent=1#consult';
     } else { cform.removeAttribute('action'); }
 
@@ -1715,8 +1718,8 @@
   document.getElementById('consultForm').addEventListener('submit', function(e){
     var form = this;
     if(EDIT){ e.preventDefault(); toast('편집 모드에서는 신청서를 보낼 수 없습니다.'); return; }
-    var email = str(CONTENT.consultFormEmail).trim();
-    if(!validEmail(email)){
+    var akey = str(CONTENT.consultAccessKey).trim();
+    if(!akey){
       e.preventDefault();
       toast('온라인 접수를 준비 중입니다. ' + (safeUrl(CONTENT.kakaoUrl) ? '전화 또는 카카오톡으로' : '전화로') + ' 문의해주세요.');
       return;
@@ -1727,14 +1730,13 @@
     var btnText = btn.textContent;
     btn.disabled = true; btn.textContent = '접수 중...';
     var data = new FormData(form);
-    data.delete('_next'); data.delete('_captcha');
-    fetch('https://formsubmit.co/ajax/' + encodeURIComponent(email), {
+    data.set('access_key', akey);
+    data.delete('redirect');
+    fetch('https://api.web3forms.com/submit', {
       method: 'POST', headers: { 'Accept': 'application/json' }, body: data
     }).then(function(res){ return res.json(); }).then(function(json){
-      if(json && String(json.success) === 'true'){
+      if(json && json.success){
         form.reset(); render(); showDone();
-      } else if(json && /activat/i.test(String(json.message||''))){
-        toast('접수 이메일 인증이 아직 완료되지 않았습니다. 잠시 후 다시 시도하시거나 전화로 문의해주세요.');
       } else {
         throw new Error((json && json.message) || '전송 실패');
       }
@@ -1898,10 +1900,7 @@
       '<div class="modal-body">' +
         '<fieldset><legend>상담 연결</legend>' +
           '<div class="field"><label>카카오톡 상담 링크</label><input type="text" id="setKakao" value="'+esc(c.kakaoUrl)+'" placeholder="https://open.kakao.com/o/... 또는 https://pf.kakao.com/..."><small>비워두면 카카오톡 버튼이 모두 숨겨집니다.</small></div>' +
-          '<div class="field"><label>상담 신청서 접수 이메일</label><input type="text" id="setSvcEmail" value="'+esc(c.consultFormEmail)+'" placeholder="example@gmail.com">' +
-            '<button type="button" class="btn btn-ghost on-light btn-sm" id="setSvcVerify" style="margin-top:10px;">인증 메일 보내기</button>' +
-            '<div id="setSvcStatus" role="status" style="display:none;margin-top:10px;padding:12px 14px;font-size:13px;line-height:1.55;"></div>' +
-            '<small>이메일을 새로 넣거나 바꾼 경우 <b>인증 메일 보내기</b>를 누른 뒤, 메일함에서 FormSubmit의 <b>Activate Form</b> 버튼을 눌러야 접수 메일이 옵니다. 비워두면 신청 시 전화 문의 안내가 표시됩니다.</small></div>' +
+          '<div class="field"><label>상담 신청서 접수 키 (Web3Forms Access Key)</label><input type="text" id="setSvcKey" value="'+esc(c.consultAccessKey)+'" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"><small>web3forms.com에서 받은 Access Key입니다. 접수 메일은 키를 발급받을 때 입력한 이메일로 옵니다. 비워두면 신청 시 전화 문의 안내가 표시됩니다.</small></div>' +
           '<div class="field"><label>관심 차종 목록 (한 줄에 하나)</label><textarea id="setModels" rows="6">'+esc((c.consultModels||[]).join('\n'))+'</textarea></div>' +
           '<div class="field"><label>희망 상담 방법 (한 줄에 하나)</label><textarea id="setMethods" rows="4">'+esc((c.consultMethods||[]).join('\n'))+'</textarea></div>' +
         '</fieldset>' +
@@ -1929,32 +1928,10 @@
       '</div>' +
       '<div class="modal-actions"><button class="btn btn-dark" id="setSave" style="width:100%;">저장</button></div>';
     document.getElementById('setClose').addEventListener('click', closeModal);
-    document.getElementById('setSvcVerify').addEventListener('click', function(){
-      var btn = this;
-      var email = document.getElementById('setSvcEmail').value.trim();
-      var st = document.getElementById('setSvcStatus');
-      function show(msg, ok){ st.style.display = 'block'; st.style.background = ok ? '#f3efe4' : '#fdf0ee'; st.style.color = ok ? '#5b4526' : '#a33a2c'; st.innerHTML = msg; }
-      if(!validEmail(email)){ show('이메일 주소를 정확히 입력해주세요.', false); return; }
-      btn.disabled = true; var t = btn.textContent; btn.textContent = '보내는 중...';
-      var data = new FormData();
-      data.append('안내', '홈페이지 관리자 화면에서 보낸 상담 접수 이메일 인증용 테스트입니다.');
-      data.append('_subject', '[견적·상담 신청] 이메일 인증 테스트');
-      fetch('https://formsubmit.co/ajax/' + encodeURIComponent(email), { method:'POST', headers:{'Accept':'application/json'}, body:data })
-      .then(function(r){ return r.json(); }).then(function(json){
-        if(json && String(json.success) === 'true'){
-          show('이미 인증된 이메일입니다. <b>'+esc(email)+'</b>로 테스트 메일을 보냈어요. 저장만 누르면 바로 사용할 수 있습니다.', true);
-        } else if(json && /activat/i.test(String(json.message||''))){
-          show('인증 메일을 보냈습니다. <b>'+esc(email)+'</b> 메일함(스팸함 포함)에서 FormSubmit의 <b>Activate Form</b> 버튼을 눌러주세요.<br>인증 후 아래 <b>저장</b>을 누르면 접수 메일이 이 주소로 옵니다.', true);
-        } else { throw new Error((json && json.message) || '전송 실패'); }
-      }).catch(function(err){
-        console.error('인증 메일 전송 실패', err);
-        show('인증 메일을 보내지 못했습니다. 이메일 주소를 확인하거나 잠시 후 다시 시도해주세요.', false);
-      }).then(function(){ btn.disabled = false; btn.textContent = t; });
-    });
     function lines(id){ return document.getElementById(id).value.split(/\n|,/).map(function(s){ return s.trim(); }).filter(Boolean); }
     document.getElementById('setSave').addEventListener('click', function(){
       CONTENT.kakaoUrl = document.getElementById('setKakao').value.trim();
-      CONTENT.consultFormEmail = document.getElementById('setSvcEmail').value.trim();
+      CONTENT.consultAccessKey = document.getElementById('setSvcKey').value.trim();
       CONTENT.consultModels = lines('setModels');
       CONTENT.consultMethods = lines('setMethods');
       CONTENT.instagramUrl = document.getElementById('setInsta').value.trim();
